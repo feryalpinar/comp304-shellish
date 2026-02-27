@@ -87,30 +87,66 @@ void parse_command(char *line, struct command_t *cmd) {
     cmd->args[cmd->arg_count] = NULL;
 }
 
+/* ================= BUILTIN CUT ================= */
 
+void builtin_cut(struct command_t *cmd) {
 
+    char delimiter = '\t';
+    char *fields = NULL;
 
-/**
- * Prints a command struct
- * @param struct command_t *
- */
-void print_command(struct command_t *command) {
-  int i = 0;
-  printf("Command: <%s>\n", command->name);
-  printf("\tIs Background: %s\n", command->background ? "yes" : "no");
-  printf("\tNeeds Auto-complete: %s\n", command->auto_complete ? "yes" : "no");
-  printf("\tRedirects:\n");
-  for (i = 0; i < 3; i++)
-    printf("\t\t%d: %s\n", i,
-           command->redirects[i] ? command->redirects[i] : "N/A");
-  printf("\tArguments (%d):\n", command->arg_count);
-  for (i = 0; i < command->arg_count; ++i)
-    printf("\t\tArg %d: %s\n", i, command->args[i]);
-  if (command->next) {
-    printf("\tPiped to:\n");
-    print_command(command->next);
-  }
+    for (int i = 1; i < cmd->arg_count; i++) {
+        if (strcmp(cmd->args[i], "-d") == 0 && i + 1 < cmd->arg_count)
+            delimiter = cmd->args[i + 1][0];
+
+        if (strcmp(cmd->args[i], "-f") == 0 && i + 1 < cmd->arg_count)
+            fields = cmd->args[i + 1];
+    }
+
+    if (!fields) {
+        printf("cut: missing -f option\n");
+        return;
+    }
+
+    int selected[100];
+    int count = 0;
+
+    char *fields_copy = strdup(fields);
+    char *field_token = strtok(fields_copy, ",");
+
+    while (field_token) {
+        selected[count++] = atoi(field_token);
+        field_token = strtok(NULL, ",");
+    }
+
+    free(fields_copy);
+
+    char delim[2];
+    delim[0] = delimiter;
+    delim[1] = '\0';
+
+    char line[MAX_LINE];
+
+    while (fgets(line, sizeof(line), stdin)) {
+
+        int field_no = 1;
+        char *token = strtok(line, delim);
+
+        while (token) {
+
+            for (int i = 0; i < count; i++) {
+                if (selected[i] == field_no)
+                    printf("%s", token);
+            }
+
+            token = strtok(NULL, delim);
+            field_no++;
+        }
+
+        printf("\n");
+    }
 }
+
+
 
 /**
  * Release allocated memory of a command
