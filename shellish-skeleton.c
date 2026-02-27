@@ -146,7 +146,22 @@ void builtin_cut(struct command_t *cmd) {
     }
 }
 
+/* ================= BUILTIN SYSINFO ================= */
 
+void builtin_sysinfo() {
+
+    printf("User: %s\n", getenv("USER"));
+
+    char hostname[256];
+    gethostname(hostname, sizeof(hostname));
+    printf("Hostname: %s\n", hostname);
+
+    printf("CPU Cores: ");
+    system("nproc");
+
+    printf("Memory Info:\n");
+    system("free -h");
+}
 
 /**
  * Release allocated memory of a command
