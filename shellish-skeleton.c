@@ -1,18 +1,19 @@
-#include <errno.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
-#include <termios.h> // termios, TCSANOW, ECHO, ICANON
 #include <unistd.h>
-const char *sysname = "shellish";
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <stdbool.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <sys/types.h>
 
-enum return_codes {
-  SUCCESS = 0,
-  EXIT = 1,
-  UNKNOWN = 2,
-};
+#define MAX_ARGS 100
+#define MAX_LINE 1024
+
+
 
 struct command_t {
   char *name;
