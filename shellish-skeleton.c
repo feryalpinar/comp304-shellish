@@ -16,6 +16,7 @@
 const char *sysname = "shellish";
 
 /* ================= STRUCT ================= */
+
 struct command_t {
     char *name;
     char *args[MAX_ARGS];
@@ -38,7 +39,6 @@ void init_command(struct command_t *cmd) {
     cmd->redirect_append = NULL;
     cmd->next = NULL;
 }
-
 
 /* ================= PARSER ================= */
 
