@@ -13,17 +13,82 @@
 #define MAX_ARGS 100
 #define MAX_LINE 1024
 
+const char *sysname = "shellish";
 
-
+/* ================= STRUCT ================= */
 struct command_t {
-  char *name;
-  bool background;
-  bool auto_complete;
-  int arg_count;
-  char **args;
-  char *redirects[3];     // in/out redirection
-  struct command_t *next; // for piping
+    char *name;
+    char *args[MAX_ARGS];
+    int arg_count;
+    bool background;
+    char *redirect_in;
+    char *redirect_out;
+    char *redirect_append;
+    struct command_t *next;
 };
+
+/* ================= INIT ================= */
+
+void init_command(struct command_t *cmd) {
+    cmd->name = NULL;
+    cmd->arg_count = 0;
+    cmd->background = false;
+    cmd->redirect_in = NULL;
+    cmd->redirect_out = NULL;
+    cmd->redirect_append = NULL;
+    cmd->next = NULL;
+}
+
+
+/* ================= PARSER ================= */
+
+void parse_command(char *line, struct command_t *cmd) {
+    init_command(cmd);
+
+    char *token = strtok(line, " \t\n");
+
+    while (token != NULL) {
+
+        if (strcmp(token, "&") == 0) {
+            cmd->background = true;
+        }
+
+        else if (strcmp(token, "<") == 0) {
+            token = strtok(NULL, " \t\n");
+            cmd->redirect_in = token;
+        }
+
+        else if (strcmp(token, ">") == 0) {
+            token = strtok(NULL, " \t\n");
+            cmd->redirect_out = token;
+        }
+
+        else if (strcmp(token, ">>") == 0) {
+            token = strtok(NULL, " \t\n");
+            cmd->redirect_append = token;
+        }
+
+        else if (strcmp(token, "|") == 0) {
+            cmd->next = malloc(sizeof(struct command_t));
+            parse_command(strtok(NULL, "\n"), cmd->next);
+            return;
+        }
+
+        else {
+            if (cmd->name == NULL)
+                cmd->name = token;
+
+            cmd->args[cmd->arg_count++] = token;
+        }
+
+        token = strtok(NULL, " \t\n");
+    }
+
+    cmd->args[cmd->arg_count] = NULL;
+}
+
+
+
 
 /**
  * Prints a command struct
