@@ -9,13 +9,19 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <sys/types.h>
+#include <signal.h>
 
 #define MAX_ARGS 100
 #define MAX_LINE 1024
 
 const char *sysname = "shellish";
 
-/* ================= STRUCT ================= */
+/* ===== GLOBALS FOR CHATROOM CLEANUP ===== */
+
+char current_user_pipe[256] = "";
+char current_room_path[256] = "";
+
+/* ===== STRUCT ===== */
 
 struct command_t {
     char *name;
@@ -28,7 +34,7 @@ struct command_t {
     struct command_t *next;
 };
 
-/* ================= INIT ================= */
+/* ===== INIT ===== */
 
 void init_command(struct command_t *cmd) {
     cmd->name = NULL;
@@ -40,9 +46,10 @@ void init_command(struct command_t *cmd) {
     cmd->next = NULL;
 }
 
-/* ================= PARSER ================= */
+/* ===== PARSER ===== */
 
 void parse_command(char *line, struct command_t *cmd) {
+
     init_command(cmd);
 
     char *token = strtok(line, " \t\n");
@@ -87,7 +94,18 @@ void parse_command(char *line, struct command_t *cmd) {
     cmd->args[cmd->arg_count] = NULL;
 }
 
-/* ================= BUILTIN CUT ================= */
+/* ===== CLEANUP HANDLER ===== */
+
+void cleanup(int sig) {
+    printf("\nExiting chatroom...\n");
+
+    if (strlen(current_user_pipe) > 0)
+        unlink(current_user_pipe);
+
+    exit(0);
+}
+
+/* ===== BUILTIN CUT ===== */
 
 void builtin_cut(struct command_t *cmd) {
 
@@ -95,11 +113,14 @@ void builtin_cut(struct command_t *cmd) {
     char *fields = NULL;
 
     for (int i = 1; i < cmd->arg_count; i++) {
-        if (strcmp(cmd->args[i], "-d") == 0 && i + 1 < cmd->arg_count)
-            delimiter = cmd->args[i + 1][0];
 
-        if (strcmp(cmd->args[i], "-f") == 0 && i + 1 < cmd->arg_count)
+        if (strcmp(cmd->args[i], "-d") == 0 && i + 1 < cmd->arg_count) {
+            delimiter = cmd->args[i + 1][0];
+        }
+
+        if (strcmp(cmd->args[i], "-f") == 0 && i + 1 < cmd->arg_count) {
             fields = cmd->args[i + 1];
+        }
     }
 
     if (!fields) {
@@ -111,31 +132,34 @@ void builtin_cut(struct command_t *cmd) {
     int count = 0;
 
     char *fields_copy = strdup(fields);
-    char *field_token = strtok(fields_copy, ",");
+    char *token_field = strtok(fields_copy, ",");
 
-    while (field_token) {
-        selected[count++] = atoi(field_token);
-        field_token = strtok(NULL, ",");
+    while (token_field) {
+        selected[count++] = atoi(token_field);
+        token_field = strtok(NULL, ",");
     }
-
-    free(fields_copy);
-
-    char delim[2];
-    delim[0] = delimiter;
-    delim[1] = '\0';
 
     char line[MAX_LINE];
 
     while (fgets(line, sizeof(line), stdin)) {
 
+        char temp[MAX_LINE];
+        strcpy(temp, line);
+
         int field_no = 1;
-        char *token = strtok(line, delim);
+
+        char delim[2];
+        delim[0] = delimiter;
+        delim[1] = '\0';
+
+        char *token = strtok(temp, delim);
 
         while (token) {
 
             for (int i = 0; i < count; i++) {
-                if (selected[i] == field_no)
+                if (selected[i] == field_no) {
                     printf("%s", token);
+                }
             }
 
             token = strtok(NULL, delim);
@@ -144,9 +168,11 @@ void builtin_cut(struct command_t *cmd) {
 
         printf("\n");
     }
+
+    free(fields_copy);
 }
 
-/* ================= BUILTIN SYSINFO ================= */
+/* ===== BUILTIN SYSINFO ===== */
 
 void builtin_sysinfo() {
 
@@ -163,27 +189,37 @@ void builtin_sysinfo() {
     system("free -h");
 }
 
-/* ================= BUILTIN CHATROOM ================= */
+/* ===== BUILTIN CHATROOM ===== */
 
 void builtin_chatroom(char *room, char *username) {
 
-    char room_path[256];
-    sprintf(room_path, "/tmp/chatroom-%s", room);
+    snprintf(current_room_path, sizeof(current_room_path),
+             "/tmp/chatroom-%s", room);
 
-    mkdir(room_path, 0777);
+    mkdir(current_room_path, 0777);
 
-    char user_pipe[256];
-    sprintf(user_pipe, "%s/%s", room_path, username);
+    snprintf(current_user_pipe, sizeof(current_user_pipe),
+             "%s/%s", current_room_path, username);
 
-    mkfifo(user_pipe, 0666);
+    if (mkfifo(current_user_pipe, 0666) == -1) {
+        if (errno != EEXIST) {
+            perror("mkfifo");
+            return;
+        }
+    }
+
+    signal(SIGINT, cleanup);
 
     printf("Welcome to %s!\n", room);
 
     pid_t reader = fork();
 
     if (reader == 0) {
+
         while (1) {
-            int fd = open(user_pipe, O_RDONLY);
+            int fd = open(current_user_pipe, O_RDONLY);
+            if (fd < 0) continue;
+
             char buffer[1024];
             int n = read(fd, buffer, sizeof(buffer) - 1);
 
@@ -207,7 +243,9 @@ void builtin_chatroom(char *room, char *username) {
         if (!fgets(message, sizeof(message), stdin))
             break;
 
-        DIR *dir = opendir(room_path);
+        DIR *dir = opendir(current_room_path);
+        if (!dir) continue;
+
         struct dirent *entry;
 
         while ((entry = readdir(dir)) != NULL) {
@@ -215,27 +253,38 @@ void builtin_chatroom(char *room, char *username) {
             if (entry->d_type == DT_FIFO &&
                 strcmp(entry->d_name, username) != 0) {
 
-                char target_pipe[256];
-                sprintf(target_pipe, "%s/%s", room_path, entry->d_name);
+                pid_t sender = fork();
 
-                int fd = open(target_pipe, O_WRONLY);
-                dprintf(fd, "[%s] %s: %s", room, username, message);
-                close(fd);
+                if (sender == 0) {
+
+                    char target_pipe[256];
+                    snprintf(target_pipe, sizeof(target_pipe),
+                             "%s/%s", current_room_path, entry->d_name);
+
+                    int fd = open(target_pipe, O_WRONLY);
+                    if (fd >= 0) {
+                        dprintf(fd, "[%s] %s: %s",
+                                room, username, message);
+                        close(fd);
+                    }
+
+                    exit(0);
+                }
             }
         }
 
         closedir(dir);
+
+        while (waitpid(-1, NULL, WNOHANG) > 0);
     }
 }
 
-/* ================= EXECUTION ================= */
+/* ===== EXECUTION ===== */
 
 void execute_command(struct command_t *cmd) {
 
     if (cmd->name == NULL)
         return;
-
-    /* Builtins */
 
     if (strcmp(cmd->name, "exit") == 0)
         exit(0);
@@ -257,17 +306,15 @@ void execute_command(struct command_t *cmd) {
     }
 
     if (strcmp(cmd->name, "chatroom") == 0) {
-
         if (cmd->arg_count < 3) {
             printf("Usage: chatroom <room> <username>\n");
             return;
         }
-
         builtin_chatroom(cmd->args[1], cmd->args[2]);
         return;
     }
 
-    /* PIPE */
+    /* ===== PIPE ===== */
 
     if (cmd->next != NULL) {
 
@@ -301,7 +348,7 @@ void execute_command(struct command_t *cmd) {
         return;
     }
 
-    /* NORMAL EXEC */
+    /* ===== NORMAL EXEC ===== */
 
     pid_t pid = fork();
 
@@ -334,7 +381,8 @@ void execute_command(struct command_t *cmd) {
         while (dir != NULL) {
 
             char fullpath[512];
-            sprintf(fullpath, "%s/%s", dir, cmd->name);
+            snprintf(fullpath, sizeof(fullpath),
+                     "%s/%s", dir, cmd->name);
 
             if (access(fullpath, X_OK) == 0)
                 execv(fullpath, cmd->args);
@@ -347,7 +395,6 @@ void execute_command(struct command_t *cmd) {
     }
 
     else {
-
         if (!cmd->background)
             waitpid(pid, NULL, 0);
         else
@@ -355,7 +402,7 @@ void execute_command(struct command_t *cmd) {
     }
 }
 
-/* ================= MAIN ================= */
+/* ===== MAIN ===== */
 
 int main() {
 
